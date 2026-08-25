@@ -17,12 +17,6 @@ services:
         sync: false
       - key: FACEBOOK_PAGE_ACCESS_TOKEN
         sync: false
-      - key: LINKEDIN_CLIENT_ID
-        sync: false
-      - key: LINKEDIN_CLIENT_SECRET
-        sync: false
-      - key: LINKEDIN_REDIRECT_URI
-        sync: false
       - key: LINKEDIN_ACCESS_TOKEN
         sync: false
       - key: LINKEDIN_PERSON_ID
@@ -30,8 +24,6 @@ services:
       - key: X_CLIENT_ID
         sync: false
       - key: X_CLIENT_SECRET
-        sync: false
-      - key: X_REDIRECT_URI
         sync: false
       - key: X_ACCESS_TOKEN
         sync: false
