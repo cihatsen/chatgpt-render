@@ -28,6 +28,28 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 def health():
     return {"status": "ok"}
 
+
+def ensure_upstream_ok(response: requests.Response, platform: str) -> None:
+    if response.ok:
+        return
+
+    categories = {
+        400: "request_rejected",
+        401: "authentication_failed",
+        403: "permission_denied",
+        404: "resource_not_found",
+        409: "conflict",
+        429: "rate_limited",
+    }
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "platform": platform,
+            "upstream_status": response.status_code,
+            "category": categories.get(response.status_code, "upstream_error"),
+        },
+    )
+
 @app.get("/instagram/status")
 def instagram_status():
     token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
@@ -75,7 +97,7 @@ def instagram_publish(post: PublishPost, _api_key: None = Depends(require_api_ke
         },
         timeout=20,
     )
-    me.raise_for_status()
+    ensure_upstream_ok(me, "instagram")
     ig_user_id = me.json()["id"]
 
     container = requests.post(
@@ -87,7 +109,7 @@ def instagram_publish(post: PublishPost, _api_key: None = Depends(require_api_ke
         },
         timeout=30,
     )
-    container.raise_for_status()
+    ensure_upstream_ok(container, "instagram")
 
     creation_id = container.json()["id"]
 
@@ -102,7 +124,7 @@ def instagram_publish(post: PublishPost, _api_key: None = Depends(require_api_ke
             },
             timeout=20,
         )
-        status_response.raise_for_status()
+        ensure_upstream_ok(status_response, "instagram")
         status_data = status_response.json()
         status_code = status_data.get("status_code")
 
@@ -154,7 +176,7 @@ def instagram_publish(post: PublishPost, _api_key: None = Depends(require_api_ke
         },
         timeout=20,
     )
-    media_info.raise_for_status()
+    ensure_upstream_ok(media_info, "instagram")
 
     return {
         "published": True,
@@ -175,7 +197,7 @@ def instagram_media(media_id: str):
         },
         timeout=20,
     )
-    r.raise_for_status()
+    ensure_upstream_ok(r, "facebook")
     return r.json()
 class FacebookPost(BaseModel):
     message: str
@@ -335,7 +357,7 @@ def linkedin_callback(
         timeout=30,
     )
 
-    token_response.raise_for_status()
+    ensure_upstream_ok(token_response, "linkedin")
     data = token_response.json()
 
     access_token = data.get("access_token")
@@ -466,7 +488,7 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
             },
             timeout=30,
         )
-        init.raise_for_status()
+        ensure_upstream_ok(init, "linkedin")
 
         init_data = init.json()["value"]
         upload_url = init_data["uploadUrl"]
@@ -476,7 +498,7 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
             post.image_url,
             timeout=30,
         )
-        image_response.raise_for_status()
+        ensure_upstream_ok(image_response, "image_source")
 
         upload = requests.put(
             upload_url,
@@ -489,7 +511,7 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
             },
             timeout=60,
         )
-        upload.raise_for_status()
+        ensure_upstream_ok(upload, "linkedin")
 
     if image_urn:
         payload["content"] = {
@@ -511,7 +533,7 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
         timeout=30,
     )
 
-    r.raise_for_status()
+    ensure_upstream_ok(r, "linkedin")
 
     post_id = r.headers.get("x-restli-id") or r.headers.get("X-RestLi-Id")
 
@@ -588,7 +610,7 @@ def x_callback(
         timeout=30,
     )
 
-    token_response.raise_for_status()
+    ensure_upstream_ok(token_response, "x")
     data = token_response.json()
 
     access_token = data.get("access_token")
@@ -644,7 +666,7 @@ def refresh_x_access_token():
         timeout=30,
     )
 
-    r.raise_for_status()
+    ensure_upstream_ok(r, "x")
     data = r.json()
 
     new_access_token = data.get("access_token")
@@ -769,7 +791,7 @@ def x_publish(post: XPost, _api_key: None = Depends(require_api_key)):
         token = os.getenv("X_ACCESS_TOKEN")
         r = send_post(token)
 
-    r.raise_for_status()
+    ensure_upstream_ok(r, "x")
     result = r.json()
 
     tweet_id = result.get("data", {}).get("id")
