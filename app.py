@@ -4,6 +4,7 @@ from dotenv import load_dotenv, set_key
 import hmac
 import os
 import requests
+import time
 
 load_dotenv(override=True)
 
@@ -84,6 +85,41 @@ def instagram_publish(post: PublishPost, _api_key: None = Depends(require_api_ke
     container.raise_for_status()
 
     creation_id = container.json()["id"]
+
+    # Instagram processes image containers asynchronously. Publishing before
+    # the container is ready returns error 9007 (Media ID is not available).
+    for _ in range(12):
+        status_response = requests.get(
+            f"https://graph.instagram.com/{creation_id}",
+            params={
+                "fields": "status_code,status",
+                "access_token": token,
+            },
+            timeout=20,
+        )
+        status_response.raise_for_status()
+        status_data = status_response.json()
+        status_code = status_data.get("status_code")
+
+        if status_code == "FINISHED":
+            break
+        if status_code in {"ERROR", "EXPIRED"}:
+            return {
+                "published": False,
+                "stage": "container_processing",
+                "status_code": status_code,
+                "instagram_error": status_data.get("status"),
+                "creation_id": creation_id,
+            }
+
+        time.sleep(5)
+    else:
+        return {
+            "published": False,
+            "stage": "container_processing",
+            "status_code": "TIMEOUT",
+            "creation_id": creation_id,
+        }
 
     publish = requests.post(
         f"https://graph.instagram.com/{ig_user_id}/media_publish",
