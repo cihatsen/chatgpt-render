@@ -354,6 +354,57 @@ class LinkedInPost(BaseModel):
     confirm: bool = False
 
 
+@app.get("/linkedin/status")
+def linkedin_status(_api_key: None = Depends(require_api_key)):
+    access_token = os.getenv("LINKEDIN_ACCESS_TOKEN")
+    client_id = os.getenv("LINKEDIN_CLIENT_ID")
+    client_secret = os.getenv("LINKEDIN_CLIENT_SECRET")
+
+    if not access_token or not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="LinkedIn credentials are missing.")
+
+    response = requests.post(
+        "https://www.linkedin.com/oauth/v2/introspectToken",
+        data={
+            "token": access_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
+    if not response.ok:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LinkedIn credential check failed with status {response.status_code}.",
+        )
+
+    data = response.json()
+    scopes = {
+        scope
+        for scope in str(data.get("scope", "")).replace(",", " ").split()
+        if scope
+    }
+
+    expires_at = data.get("expires_at")
+    days_remaining = None
+    if expires_at is not None:
+        try:
+            expires_timestamp = float(expires_at)
+            if expires_timestamp > 10_000_000_000:
+                expires_timestamp /= 1000
+            days_remaining = max(0, int((expires_timestamp - time.time()) // 86400))
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "connected": bool(data.get("active")),
+        "w_member_social": "w_member_social" in scopes,
+        "days_remaining": days_remaining,
+        "renewal_required": days_remaining is not None and days_remaining <= 7,
+    }
+
+
 @app.post("/linkedin/preview")
 def linkedin_preview(post: LinkedInPost):
     return {
