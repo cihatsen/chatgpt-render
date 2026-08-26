@@ -814,76 +814,32 @@ class PublishAllPost(BaseModel):
 
 @app.post("/publish-all")
 def publish_all(post: PublishAllPost, _api_key: None = Depends(require_api_key)):
-    if not post.confirm:
-        return {
-            "published": False,
-            "reason": "Explicit confirmation required.",
-            "results": {}
-        }
-
-    results = {}
-
-    try:
-        results["instagram"] = instagram_publish(
-            PublishPost(
-                caption=post.instagram_caption,
-                image_url=post.image_url,
-                confirm=True
-            )
+    if post.confirm:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "category": "bulk_publish_disabled",
+                "message": "Publish each platform separately to avoid partial or duplicate posts.",
+            },
         )
-    except Exception as e:
-        results["instagram"] = {
-            "published": False,
-            "error": str(e)
-        }
-
-    try:
-        results["facebook"] = facebook_publish(
-            FacebookPost(
-                message=post.facebook_message,
-                image_url=post.image_url,
-                confirm=True
-            )
-        )
-    except Exception as e:
-        results["facebook"] = {
-            "published": False,
-            "error": str(e)
-        }
-
-    try:
-        results["linkedin"] = linkedin_publish(
-            LinkedInPost(
-                text=post.linkedin_text,
-                image_url=post.image_url,
-                confirm=True
-            )
-        )
-    except Exception as e:
-        results["linkedin"] = {
-            "published": False,
-            "error": str(e)
-        }
-
-    try:
-        results["x"] = x_publish(
-            XPost(
-                text=post.x_text,
-                confirm=True
-            )
-        )
-    except Exception as e:
-        results["x"] = {
-            "published": False,
-            "error": str(e)
-        }
-
-    all_success = all(
-        result.get("published") is True
-        for result in results.values()
-    )
 
     return {
-        "published": all_success,
-        "results": results
+        "published": False,
+        "dry_run": True,
+        "reason": "Bulk preview only. Publish each platform separately.",
+        "previews": {
+            "instagram": {
+                "caption": post.instagram_caption,
+                "image_url": post.image_url,
+            },
+            "facebook": {
+                "message": post.facebook_message,
+                "image_url": post.image_url,
+            },
+            "linkedin": {
+                "text": post.linkedin_text,
+                "image_url": post.image_url,
+            },
+            "x": {"text": post.x_text},
+        },
     }
