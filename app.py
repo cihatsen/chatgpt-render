@@ -50,6 +50,12 @@ def ensure_upstream_ok(response: requests.Response, platform: str) -> None:
         },
     )
 
+
+def require_oauth_setup_enabled() -> None:
+    enabled = os.getenv("OAUTH_SETUP_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=404, detail="Not found.")
+
 @app.get("/instagram/status")
 def instagram_status():
     token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
@@ -289,6 +295,7 @@ linkedin_oauth_states: set[str] = set()
 
 @app.get("/linkedin/login")
 def linkedin_login():
+    require_oauth_setup_enabled()
     client_id = os.getenv("LINKEDIN_CLIENT_ID")
     redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
 
@@ -323,6 +330,7 @@ def linkedin_callback(
     error: str | None = None,
     error_description: str | None = None,
 ):
+    require_oauth_setup_enabled()
     if error:
         return {
             "oauth_error": error,
@@ -545,6 +553,7 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
 x_oauth_state = {}
 @app.get("/x/login")
 def x_login():
+    require_oauth_setup_enabled()
     client_id = os.getenv("X_CLIENT_ID")
     redirect_uri = os.getenv("X_REDIRECT_URI")
 
@@ -580,6 +589,7 @@ def x_callback(
     state: str | None = None,
     error: str | None = None,
 ):
+    require_oauth_setup_enabled()
     if error:
         return {"oauth_error": error}
 

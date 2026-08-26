@@ -11,6 +11,8 @@ services:
         value: 3.13.4
       - key: APP_API_KEY
         generateValue: true
+      - key: OAUTH_SETUP_ENABLED
+        value: "false"
       - key: FACEBOOK_PAGE_ID
         sync: false
       - key: LINKEDIN_PERSON_ID
