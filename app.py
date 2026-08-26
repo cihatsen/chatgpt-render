@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import os
 import requests
+from requests_oauthlib import OAuth1
 import secrets
 import time
 from urllib.parse import urlencode
@@ -340,6 +341,7 @@ def linkedin_callback(
     access_token = data.get("access_token")
     if access_token:
         set_key(".env", "LINKEDIN_ACCESS_TOKEN", access_token)
+        os.environ["LINKEDIN_ACCESS_TOKEN"] = access_token
 
     return {
         "access_token_received": bool(access_token),
@@ -543,9 +545,11 @@ def x_callback(
 
     if access_token:
         set_key(".env", "X_ACCESS_TOKEN", access_token)
+        os.environ["X_ACCESS_TOKEN"] = access_token
 
     if refresh_token:
         set_key(".env", "X_REFRESH_TOKEN", refresh_token)
+        os.environ["X_REFRESH_TOKEN"] = refresh_token
 
     return {
         "access_token_received": bool(access_token),
@@ -613,6 +617,66 @@ def refresh_x_access_token():
 @app.post("/x/refresh-token")
 def x_refresh_token(_api_key: None = Depends(require_api_key)):
     return refresh_x_access_token()
+
+
+def x_oauth1_auth() -> OAuth1 | None:
+    consumer_key = os.getenv("X_OAUTH1_CONSUMER_KEY")
+    consumer_secret = os.getenv("X_OAUTH1_CONSUMER_SECRET")
+    access_token = os.getenv("X_OAUTH1_ACCESS_TOKEN")
+    access_token_secret = os.getenv("X_OAUTH1_ACCESS_TOKEN_SECRET")
+
+    credentials = (
+        consumer_key,
+        consumer_secret,
+        access_token,
+        access_token_secret,
+    )
+    if not all(credentials):
+        return None
+
+    return OAuth1(
+        consumer_key,
+        client_secret=consumer_secret,
+        resource_owner_key=access_token,
+        resource_owner_secret=access_token_secret,
+    )
+
+
+@app.get("/x/status")
+def x_status(_api_key: None = Depends(require_api_key)):
+    oauth1 = x_oauth1_auth()
+    if oauth1:
+        response = requests.get(
+            "https://api.x.com/2/users/me",
+            auth=oauth1,
+            timeout=30,
+        )
+        auth_mode = "oauth1"
+    else:
+        access_token = os.getenv("X_ACCESS_TOKEN")
+        if not access_token:
+            raise HTTPException(status_code=503, detail="X credentials are missing.")
+        response = requests.get(
+            "https://api.x.com/2/users/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        auth_mode = "oauth2"
+
+    if not response.ok:
+        raise HTTPException(
+            status_code=502,
+            detail=f"X credential check failed with status {response.status_code}.",
+        )
+
+    data = response.json().get("data", {})
+    return {
+        "connected": bool(data.get("id")),
+        "auth_mode": auth_mode,
+        "user_id_present": bool(data.get("id")),
+    }
+
+
 @app.post("/x/publish")
 def x_publish(post: XPost, _api_key: None = Depends(require_api_key)):
     if not post.confirm:
@@ -621,15 +685,20 @@ def x_publish(post: XPost, _api_key: None = Depends(require_api_key)):
             "reason": "Explicit confirmation required."
         }
 
+    oauth1 = x_oauth1_auth()
     token = os.getenv("X_ACCESS_TOKEN")
 
-    if not token:
-        return {
-            "published": False,
-            "reason": "X access token is missing."
-        }
+    if not oauth1 and not token:
+        raise HTTPException(status_code=503, detail="X credentials are missing.")
 
-    def send_post(access_token: str):
+    def send_post(access_token: str | None = None):
+        if oauth1:
+            return requests.post(
+                "https://api.x.com/2/tweets",
+                auth=oauth1,
+                json={"text": post.text},
+                timeout=30,
+            )
         return requests.post(
             "https://api.x.com/2/tweets",
             headers={
@@ -644,7 +713,7 @@ def x_publish(post: XPost, _api_key: None = Depends(require_api_key)):
 
     r = send_post(token)
 
-    if r.status_code == 401:
+    if not oauth1 and r.status_code == 401:
         refresh_x_access_token()
         token = os.getenv("X_ACCESS_TOKEN")
         r = send_post(token)
@@ -657,6 +726,7 @@ def x_publish(post: XPost, _api_key: None = Depends(require_api_key)):
     return {
         "published": True,
         "platform": "x",
+        "auth_mode": "oauth1" if oauth1 else "oauth2",
         "post_id": tweet_id,
         "url": f"https://x.com/i/web/status/{tweet_id}" if tweet_id else None
     }

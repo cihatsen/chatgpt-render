@@ -1,4 +1,5 @@
 fastapi
 python-dotenv
 requests
+requests-oauthlib
 uvicorn[standard]
