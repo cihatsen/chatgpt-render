@@ -1,10 +1,14 @@
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv, set_key
+import base64
+import hashlib
 import hmac
 import os
 import requests
+import secrets
 import time
+from urllib.parse import urlencode
 
 load_dotenv(override=True)
 
@@ -257,16 +261,29 @@ def facebook_publish(post: FacebookPost, _api_key: None = Depends(require_api_ke
         "post_id": post_id,
         "permalink": permalink
     }
+linkedin_oauth_states: set[str] = set()
+
+
 @app.get("/linkedin/login")
 def linkedin_login():
     client_id = os.getenv("LINKEDIN_CLIENT_ID")
     redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI")
+
+    if not client_id or not redirect_uri:
+        raise HTTPException(
+            status_code=503,
+            detail="LinkedIn OAuth settings are not configured.",
+        )
+
+    state = secrets.token_urlsafe(32)
+    linkedin_oauth_states.add(state)
 
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": "openid profile w_member_social",
+        "state": state,
     }
 
     return {
@@ -277,9 +294,9 @@ def linkedin_login():
 
 
 @app.get("/linkedin/callback")
-@app.get("/linkedin/callback")
 def linkedin_callback(
     code: str | None = None,
+    state: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
 ):
@@ -293,6 +310,13 @@ def linkedin_callback(
         return {
             "oauth_error": "missing_code"
         }
+
+    if not state or state not in linkedin_oauth_states:
+        return {
+            "oauth_error": "invalid_state"
+        }
+
+    linkedin_oauth_states.remove(state)
 
     client_id = os.getenv("LINKEDIN_CLIENT_ID")
     client_secret = os.getenv("LINKEDIN_CLIENT_SECRET")
@@ -358,6 +382,18 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
     author = f"urn:li:person:{person_id}"
 
     image_urn = None
+    payload = {
+        "author": author,
+        "commentary": post.text,
+        "visibility": "PUBLIC",
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": []
+        },
+        "lifecycleState": "PUBLISHED",
+        "isReshareDisabledByAuthor": False
+    }
 
     if post.image_url:
         api_headers = {
@@ -402,19 +438,6 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
         )
         upload.raise_for_status()
 
-        payload = {
-        "author": author,
-        "commentary": post.text,
-        "visibility": "PUBLIC",
-        "distribution": {
-            "feedDistribution": "MAIN_FEED",
-            "targetEntities": [],
-            "thirdPartyDistributionChannels": []
-        },
-        "lifecycleState": "PUBLISHED",
-        "isReshareDisabledByAuthor": False
-    }
-
     if image_urn:
         payload["content"] = {
             "media": {
@@ -444,11 +467,6 @@ def linkedin_publish(post: LinkedInPost, _api_key: None = Depends(require_api_ke
         "platform": "linkedin",
         "post_id": post_id
     }
-import base64
-import hashlib
-import secrets
-from urllib.parse import urlencode
-
 x_oauth_state = {}
 @app.get("/x/login")
 def x_login():
